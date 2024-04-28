@@ -359,7 +359,7 @@ def run_crackmapexec_against_domain(user_input_target_ips: io.TextIOWrapper, use
 
 	# Terminal feed showing the overall options being ran.
 	# If IP argument is a file, only the file name is presented.
-	if user_input_local_flag == False:
+	if not user_input_local_flag:
 		domain = "Domain"
 		print(
 			"\n"
